@@ -25,7 +25,9 @@ public final class Cluster {
     private final List<Node> nodes;
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
+    private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
+    private final Map<Integer, Node> nodesById;
 
     /**
      * Create a new cluster with the given nodes and partitions
@@ -37,6 +39,10 @@ public final class Cluster {
         List<Node> copy = new ArrayList<Node>(nodes);
         Collections.shuffle(copy);
         this.nodes = Collections.unmodifiableList(copy);
+        
+        this.nodesById = new HashMap<Integer, Node>();
+        for (Node node: nodes)
+            this.nodesById.put(node.id(), node);
 
         // index the partitions by topic/partition for quick lookup
         this.partitionsByTopicPartition = new HashMap<TopicPartition, PartitionInfo>(partitions.size());
@@ -63,8 +69,18 @@ public final class Cluster {
             }
         }
         this.partitionsByTopic = new HashMap<String, List<PartitionInfo>>(partsForTopic.size());
-        for (Map.Entry<String, List<PartitionInfo>> entry : partsForTopic.entrySet())
-            this.partitionsByTopic.put(entry.getKey(), Collections.unmodifiableList(entry.getValue()));
+        this.availablePartitionsByTopic = new HashMap<String, List<PartitionInfo>>(partsForTopic.size());
+        for (Map.Entry<String, List<PartitionInfo>> entry : partsForTopic.entrySet()) {
+            String topic = entry.getKey();
+            List<PartitionInfo> partitionList = entry.getValue();
+            this.partitionsByTopic.put(topic, Collections.unmodifiableList(partitionList));
+            List<PartitionInfo> availablePartitions = new ArrayList<PartitionInfo>();
+            for (PartitionInfo part : partitionList) {
+                if (part.leader() != null)
+                    availablePartitions.add(part);
+            }
+            this.availablePartitionsByTopic.put(topic, Collections.unmodifiableList(availablePartitions));
+        }
         this.partitionsByNode = new HashMap<Integer, List<PartitionInfo>>(partsForNode.size());
         for (Map.Entry<Integer, List<PartitionInfo>> entry : partsForNode.entrySet())
             this.partitionsByNode.put(entry.getKey(), Collections.unmodifiableList(entry.getValue()));
@@ -97,6 +113,15 @@ public final class Cluster {
     public List<Node> nodes() {
         return this.nodes;
     }
+    
+    /**
+     * Get the node by the node id (or null if no such node exists)
+     * @param id The id of the node
+     * @return The node, or null if no such node exists
+     */
+    public Node nodeById(int id) {
+        return this.nodesById.get(id);
+    }
 
     /**
      * Get the current leader for the given topic-partition
@@ -127,6 +152,15 @@ public final class Cluster {
      */
     public List<PartitionInfo> partitionsForTopic(String topic) {
         return this.partitionsByTopic.get(topic);
+    }
+
+    /**
+     * Get the list of available partitions for this topic
+     * @param topic The topic name
+     * @return A list of partitions
+     */
+    public List<PartitionInfo> availablePartitionsForTopic(String topic) {
+        return this.availablePartitionsByTopic.get(topic);
     }
 
     /**

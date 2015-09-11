@@ -20,6 +20,8 @@ package kafka.api
 import kafka.common.KafkaException
 import java.nio.ByteBuffer
 
+import kafka.network.InvalidRequestException
+
 object RequestKeys {
   val ProduceKey: Short = 0
   val FetchKey: Short = 1
@@ -46,9 +48,7 @@ object RequestKeys {
         ControlledShutdownKey -> ("ControlledShutdown", ControlledShutdownRequest.readFrom),
         OffsetCommitKey -> ("OffsetCommit", OffsetCommitRequest.readFrom),
         OffsetFetchKey -> ("OffsetFetch", OffsetFetchRequest.readFrom),
-        ConsumerMetadataKey -> ("ConsumerMetadata", ConsumerMetadataRequest.readFrom),
-        JoinGroupKey -> ("JoinGroup", JoinGroupRequestAndHeader.readFrom),
-        HeartbeatKey -> ("Heartbeat", HeartbeatRequestAndHeader.readFrom)
+        ConsumerMetadataKey -> ("ConsumerMetadata", ConsumerMetadataRequest.readFrom)
     )
 
   def nameForKey(key: Short): String = {
@@ -61,7 +61,7 @@ object RequestKeys {
   def deserializerForKey(key: Short): (ByteBuffer) => RequestOrResponse = {
     keyToNameAndDeserializerMap.get(key) match {
       case Some(nameAndSerializer) => nameAndSerializer._2
-      case None => throw new KafkaException("Wrong request type %d".format(key))
+      case None => throw new InvalidRequestException("Wrong request type %d".format(key))
     }
   }
 }

@@ -14,6 +14,7 @@ package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.protocol.ProtoUtils;
 import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
@@ -21,32 +22,31 @@ import org.apache.kafka.common.utils.CollectionUtils;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * This wrapper supports both v0 and v1 of OffsetFetchRequest.
  */
-public class OffsetFetchRequest extends AbstractRequestResponse {
-    public static Schema curSchema = ProtoUtils.currentRequestSchema(ApiKeys.OFFSET_FETCH.id);
-    private static String GROUP_ID_KEY_NAME = "group_id";
-    private static String TOPICS_KEY_NAME = "topics";
+public class OffsetFetchRequest extends AbstractRequest {
+    
+    private static final Schema CURRENT_SCHEMA = ProtoUtils.currentRequestSchema(ApiKeys.OFFSET_FETCH.id);
+    private static final String GROUP_ID_KEY_NAME = "group_id";
+    private static final String TOPICS_KEY_NAME = "topics";
 
     // topic level field names
-    private static String TOPIC_KEY_NAME = "topic";
-    private static String PARTITIONS_KEY_NAME = "partitions";
+    private static final String TOPIC_KEY_NAME = "topic";
+    private static final String PARTITIONS_KEY_NAME = "partitions";
 
     // partition level field names
-    private static String PARTITION_KEY_NAME = "partition";
-
-    public static final int DEFAULT_GENERATION_ID = -1;
-    public static final String DEFAULT_CONSUMER_ID = "";
+    private static final String PARTITION_KEY_NAME = "partition";
 
     private final String groupId;
     private final List<TopicPartition> partitions;
 
     public OffsetFetchRequest(String groupId, List<TopicPartition> partitions) {
-        super(new Struct(curSchema));
+        super(new Struct(CURRENT_SCHEMA));
 
         Map<String, List<Integer>> topicsData = CollectionUtils.groupDataByTopic(partitions);
 
@@ -82,7 +82,28 @@ public class OffsetFetchRequest extends AbstractRequestResponse {
             }
         }
         groupId = struct.getString(GROUP_ID_KEY_NAME);
-   }
+    }
+
+    @Override
+    public AbstractRequestResponse getErrorResponse(int versionId, Throwable e) {
+        Map<TopicPartition, OffsetFetchResponse.PartitionData> responseData = new HashMap<TopicPartition, OffsetFetchResponse.PartitionData>();
+
+        for (TopicPartition partition: partitions) {
+            responseData.put(partition, new OffsetFetchResponse.PartitionData(OffsetFetchResponse.INVALID_OFFSET,
+                    OffsetFetchResponse.NO_METADATA,
+                    Errors.forException(e).code()));
+        }
+
+        switch (versionId) {
+            // OffsetFetchResponseV0 == OffsetFetchResponseV1
+            case 0:
+            case 1:
+                return new OffsetFetchResponse(responseData);
+            default:
+                throw new IllegalArgumentException(String.format("Version %d is not valid. Valid versions for %s are 0 to %d",
+                        versionId, this.getClass().getSimpleName(), ProtoUtils.latestVersion(ApiKeys.OFFSET_FETCH.id)));
+        }
+    }
 
     public String groupId() {
         return groupId;
@@ -92,7 +113,11 @@ public class OffsetFetchRequest extends AbstractRequestResponse {
         return partitions;
     }
 
+    public static OffsetFetchRequest parse(ByteBuffer buffer, int versionId) {
+        return new OffsetFetchRequest(ProtoUtils.parseRequest(ApiKeys.OFFSET_FETCH.id, versionId, buffer));
+    }
+
     public static OffsetFetchRequest parse(ByteBuffer buffer) {
-        return new OffsetFetchRequest(((Struct) curSchema.read(buffer)));
+        return new OffsetFetchRequest((Struct) CURRENT_SCHEMA.read(buffer));
     }
 }

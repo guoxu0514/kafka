@@ -13,24 +13,26 @@
 package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.protocol.ProtoUtils;
 import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
 
-public class HeartbeatRequest extends AbstractRequestResponse {
-    public static Schema curSchema = ProtoUtils.currentRequestSchema(ApiKeys.HEARTBEAT.id);
-    private static String GROUP_ID_KEY_NAME = "group_id";
-    private static String GROUP_GENERATION_ID_KEY_NAME = "group_generation_id";
-    private static String CONSUMER_ID_KEY_NAME = "consumer_id";
+public class HeartbeatRequest extends AbstractRequest {
+    
+    private static final Schema CURRENT_SCHEMA = ProtoUtils.currentRequestSchema(ApiKeys.HEARTBEAT.id);
+    private static final String GROUP_ID_KEY_NAME = "group_id";
+    private static final String GROUP_GENERATION_ID_KEY_NAME = "group_generation_id";
+    private static final String CONSUMER_ID_KEY_NAME = "consumer_id";
 
     private final String groupId;
     private final int groupGenerationId;
     private final String consumerId;
 
     public HeartbeatRequest(String groupId, int groupGenerationId, String consumerId) {
-        super(new Struct(curSchema));
+        super(new Struct(CURRENT_SCHEMA));
         struct.set(GROUP_ID_KEY_NAME, groupId);
         struct.set(GROUP_GENERATION_ID_KEY_NAME, groupGenerationId);
         struct.set(CONSUMER_ID_KEY_NAME, consumerId);
@@ -46,6 +48,17 @@ public class HeartbeatRequest extends AbstractRequestResponse {
         consumerId = struct.getString(CONSUMER_ID_KEY_NAME);
     }
 
+    @Override
+    public AbstractRequestResponse getErrorResponse(int versionId, Throwable e) {
+        switch (versionId) {
+            case 0:
+                return new HeartbeatResponse(Errors.forException(e).code());
+            default:
+                throw new IllegalArgumentException(String.format("Version %d is not valid. Valid versions for %s are 0 to %d",
+                        versionId, this.getClass().getSimpleName(), ProtoUtils.latestVersion(ApiKeys.HEARTBEAT.id)));
+        }
+    }
+
     public String groupId() {
         return groupId;
     }
@@ -58,7 +71,11 @@ public class HeartbeatRequest extends AbstractRequestResponse {
         return consumerId;
     }
 
+    public static HeartbeatRequest parse(ByteBuffer buffer, int versionId) {
+        return new HeartbeatRequest(ProtoUtils.parseRequest(ApiKeys.HEARTBEAT.id, versionId, buffer));
+    }
+
     public static HeartbeatRequest parse(ByteBuffer buffer) {
-        return new HeartbeatRequest(((Struct) curSchema.read(buffer)));
+        return new HeartbeatRequest((Struct) CURRENT_SCHEMA.read(buffer));
     }
 }

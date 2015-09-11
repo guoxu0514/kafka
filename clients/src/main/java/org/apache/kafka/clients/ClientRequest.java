@@ -22,24 +22,44 @@ public final class ClientRequest {
     private final long createdMs;
     private final boolean expectResponse;
     private final RequestSend request;
-    private final Object attachment;
+    private final RequestCompletionHandler callback;
+    private final boolean isInitiatedByNetworkClient;
 
     /**
      * @param createdMs The unix timestamp in milliseconds for the time at which this request was created.
      * @param expectResponse Should we expect a response message or is this request complete once it is sent?
      * @param request The request
-     * @param attachment Associated data with the request
+     * @param callback A callback to execute when the response has been received (or null if no callback is necessary)
      */
-    public ClientRequest(long createdMs, boolean expectResponse, RequestSend request, Object attachment) {
+    public ClientRequest(long createdMs, boolean expectResponse, RequestSend request,
+                         RequestCompletionHandler callback) {
+        this(createdMs, expectResponse, request, callback, false);
+    }
+
+    /**
+     * @param createdMs The unix timestamp in milliseconds for the time at which this request was created.
+     * @param expectResponse Should we expect a response message or is this request complete once it is sent?
+     * @param request The request
+     * @param callback A callback to execute when the response has been received (or null if no callback is necessary)
+     * @param isInitiatedByNetworkClient Is request initiated by network client, if yes, its
+     *                                   response will be consumed by network client
+     */
+    public ClientRequest(long createdMs, boolean expectResponse, RequestSend request,
+                         RequestCompletionHandler callback, boolean isInitiatedByNetworkClient) {
         this.createdMs = createdMs;
-        this.attachment = attachment;
+        this.callback = callback;
         this.request = request;
         this.expectResponse = expectResponse;
+        this.isInitiatedByNetworkClient = isInitiatedByNetworkClient;
     }
 
     @Override
     public String toString() {
-        return "ClientRequest(expectResponse=" + expectResponse + ", payload=" + attachment + ", request=" + request + ")";
+        return "ClientRequest(expectResponse=" + expectResponse +
+            ", callback=" + callback +
+            ", request=" + request +
+            (isInitiatedByNetworkClient ? ", isInitiatedByNetworkClient" : "") +
+            ")";
     }
 
     public boolean expectResponse() {
@@ -50,12 +70,20 @@ public final class ClientRequest {
         return request;
     }
 
-    public Object attachment() {
-        return attachment;
+    public boolean hasCallback() {
+        return callback != null;
+    }
+
+    public RequestCompletionHandler callback() {
+        return callback;
     }
 
     public long createdTime() {
         return createdMs;
+    }
+
+    public boolean isInitiatedByNetworkClient() {
+        return isInitiatedByNetworkClient;
     }
 
 }

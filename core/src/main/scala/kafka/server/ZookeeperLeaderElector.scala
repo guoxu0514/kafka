@@ -17,7 +17,7 @@
 package kafka.server
 
 import kafka.utils.ZkUtils._
-import kafka.utils.Utils._
+import kafka.utils.CoreUtils._
 import kafka.utils.{Json, SystemTime, Logging}
 import org.I0Itec.zkclient.exception.ZkNodeExistsException
 import org.I0Itec.zkclient.IZkDataListener
@@ -119,8 +119,12 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
     @throws(classOf[Exception])
     def handleDataChange(dataPath: String, data: Object) {
       inLock(controllerContext.controllerLock) {
+        val amILeaderBeforeDataChange = amILeader
         leaderId = KafkaController.parseControllerId(data.toString)
         info("New leader is %d".format(leaderId))
+        // The old leader needs to resign leadership if it is no longer the leader
+        if (amILeaderBeforeDataChange && !amILeader)
+          onResigningAsLeader()
       }
     }
 

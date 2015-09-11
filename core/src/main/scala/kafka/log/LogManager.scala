@@ -57,8 +57,9 @@ class LogManager(val logDirs: Array[File],
   private val dirLocks = lockLogDirs(logDirs)
   private val recoveryPointCheckpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, RecoveryPointCheckpointFile)))).toMap
   loadLogs()
-  
-  private val cleaner: LogCleaner = 
+
+  // public, so we can access this from kafka.admin.DeleteTopicTest
+  val cleaner: LogCleaner =
     if(cleanerConfig.enableCleaner)
       new LogCleaner(cleanerConfig, logDirs, logs, time = time)
     else
@@ -125,16 +126,24 @@ class LogManager(val logDirs: Array[File],
         brokerState.newState(RecoveringFromUncleanShutdown)
       }
 
-      val recoveryPoints = this.recoveryPointCheckpoints(dir).read
+      var recoveryPoints = Map[TopicAndPartition, Long]()
+      try {
+        recoveryPoints = this.recoveryPointCheckpoints(dir).read
+      } catch {
+        case e: Exception => {
+          warn("Error occured while reading recovery-point-offset-checkpoint file of directory " + dir, e)
+          warn("Resetting the recovery checkpoint to 0")
+        }
+      }
 
       val jobsForDir = for {
         dirContent <- Option(dir.listFiles).toList
         logDir <- dirContent if logDir.isDirectory
       } yield {
-        Utils.runnable {
+        CoreUtils.runnable {
           debug("Loading log '" + logDir.getName + "'")
 
-          val topicPartition = Log.parseTopicPartitionName(logDir.getName)
+          val topicPartition = Log.parseTopicPartitionName(logDir)
           val config = topicConfigs.getOrElse(topicPartition.topic, defaultConfig)
           val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
 
@@ -209,7 +218,7 @@ class LogManager(val logDirs: Array[File],
 
     // stop the cleaner first
     if (cleaner != null) {
-      Utils.swallow(cleaner.shutdown())
+      CoreUtils.swallow(cleaner.shutdown())
     }
 
     // close logs in each dir
@@ -222,7 +231,7 @@ class LogManager(val logDirs: Array[File],
       val logsInDir = logsByDir.getOrElse(dir.toString, Map()).values
 
       val jobsForDir = logsInDir map { log =>
-        Utils.runnable {
+        CoreUtils.runnable {
           // flush the log to ensure latest possible recovery point
           log.flush()
           log.close()
@@ -243,7 +252,7 @@ class LogManager(val logDirs: Array[File],
 
         // mark that the shutdown was clean by creating marker file
         debug("Writing clean shutdown marker at " + dir)
-        Utils.swallow(new File(dir, Log.CleanShutdownFile).createNewFile())
+        CoreUtils.swallow(new File(dir, Log.CleanShutdownFile).createNewFile())
       }
     } catch {
       case e: ExecutionException => {
@@ -355,7 +364,7 @@ class LogManager(val logDirs: Array[File],
            .format(topicAndPartition.topic, 
                    topicAndPartition.partition, 
                    dataDir.getAbsolutePath,
-                   {import JavaConversions._; config.toProps.mkString(", ")}))
+                   {import JavaConversions._; config.originals.mkString(", ")}))
       log
     }
   }
@@ -370,8 +379,10 @@ class LogManager(val logDirs: Array[File],
     }
     if (removedLog != null) {
       //We need to wait until there is no more cleaning task on the log to be deleted before actually deleting it.
-      if (cleaner != null)
+      if (cleaner != null) {
         cleaner.abortCleaning(topicAndPartition)
+        cleaner.updateCheckpoints(removedLog.dir.getParentFile)
+      }
       removedLog.delete()
       info("Deleted log for partition [%s,%d] in %s."
            .format(topicAndPartition.topic,
@@ -404,6 +415,8 @@ class LogManager(val logDirs: Array[File],
    * Runs through the log removing segments older than a certain age
    */
   private def cleanupExpiredSegments(log: Log): Int = {
+    if (log.config.retentionMs < 0)
+      return 0
     val startMs = time.milliseconds
     log.deleteOldSegments(startMs - _.lastModified > log.config.retentionMs)
   }

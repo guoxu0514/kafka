@@ -17,17 +17,17 @@
 
 package kafka.utils
 
+import kafka.controller.LeaderIsrAndControllerEpoch
 import kafka.server.{ReplicaFetcherManager, KafkaConfig}
 import kafka.api.LeaderAndIsr
 import kafka.zk.ZooKeeperTestHarness
 import kafka.common.TopicAndPartition
-import org.scalatest.junit.JUnit3Suite
 import org.junit.Assert._
-import org.junit.Test
+import org.junit.{Before, Test}
 import org.easymock.EasyMock
 
 
-class ReplicationUtilsTest extends JUnit3Suite with ZooKeeperTestHarness {
+class ReplicationUtilsTest extends ZooKeeperTestHarness {
   val topic = "my-topic-test"
   val partitionId = 0
   val brokerId = 1
@@ -42,7 +42,9 @@ class ReplicationUtilsTest extends JUnit3Suite with ZooKeeperTestHarness {
   val topicDataMismatch = Json.encode(Map("controller_epoch" -> 1, "leader" -> 1,
     "versions" -> 2, "leader_epoch" -> 2,"isr" -> List(1,2)))
 
+  val topicDataLeaderIsrAndControllerEpoch = LeaderIsrAndControllerEpoch(LeaderAndIsr(1,leaderEpoch,List(1,2),0), controllerEpoch)
 
+  @Before
   override def setUp() {
     super.setUp()
     ZkUtils.createPersistentPath(zkClient,topicPath,topicData)
@@ -50,7 +52,7 @@ class ReplicationUtilsTest extends JUnit3Suite with ZooKeeperTestHarness {
 
   @Test
   def testUpdateLeaderAndIsr() {
-    val configs = TestUtils.createBrokerConfigs(1).map(new KafkaConfig(_))
+    val configs = TestUtils.createBrokerConfigs(1, zkConnect).map(KafkaConfig.fromProps)
     val log = EasyMock.createMock(classOf[kafka.log.Log])
     EasyMock.expect(log.logEndOffset).andReturn(20).anyTimes()
     EasyMock.expect(log)
@@ -66,6 +68,8 @@ class ReplicationUtilsTest extends JUnit3Suite with ZooKeeperTestHarness {
     EasyMock.expect(replicaManager.replicaFetcherManager).andReturn(EasyMock.createMock(classOf[ReplicaFetcherManager]))
     EasyMock.expect(replicaManager.zkClient).andReturn(zkClient)
     EasyMock.replay(replicaManager)
+
+    ZkUtils.makeSurePersistentPathExists(zkClient, ZkUtils.IsrChangeNotificationPath)
 
     val replicas = List(0,1)
 
@@ -90,6 +94,13 @@ class ReplicationUtilsTest extends JUnit3Suite with ZooKeeperTestHarness {
       "my-topic-test", partitionId, newLeaderAndIsr3, controllerEpoch, zkVersion + 1)
     assertFalse(updateSucceeded3)
     assertEquals(newZkVersion3,-1)
+  }
+
+  @Test
+  def testGetLeaderIsrAndEpochForPartition() {
+    val leaderIsrAndControllerEpoch = ReplicationUtils.getLeaderIsrAndEpochForPartition(zkClient, topic, partitionId)
+    assertEquals(topicDataLeaderIsrAndControllerEpoch, leaderIsrAndControllerEpoch.get)
+    assertEquals(None, ReplicationUtils.getLeaderIsrAndEpochForPartition(zkClient, topic, partitionId + 1))
   }
 
 }

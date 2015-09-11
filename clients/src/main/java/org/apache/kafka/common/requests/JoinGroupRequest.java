@@ -12,22 +12,28 @@
  */
 package org.apache.kafka.common.requests;
 
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.protocol.ProtoUtils;
 import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
-public class JoinGroupRequest extends AbstractRequestResponse {
-    public static Schema curSchema = ProtoUtils.currentRequestSchema(ApiKeys.JOIN_GROUP.id);
-    private static String GROUP_ID_KEY_NAME = "group_id";
-    private static String SESSION_TIMEOUT_KEY_NAME = "session_timeout";
-    private static String TOPICS_KEY_NAME = "topics";
-    private static String CONSUMER_ID_KEY_NAME = "consumer_id";
-    private static String STRATEGY_KEY_NAME = "partition_assignment_strategy";
+public class JoinGroupRequest extends AbstractRequest {
+    
+    private static final Schema CURRENT_SCHEMA = ProtoUtils.currentRequestSchema(ApiKeys.JOIN_GROUP.id);
+    private static final String GROUP_ID_KEY_NAME = "group_id";
+    private static final String SESSION_TIMEOUT_KEY_NAME = "session_timeout";
+    private static final String TOPICS_KEY_NAME = "topics";
+    private static final String CONSUMER_ID_KEY_NAME = "consumer_id";
+    private static final String STRATEGY_KEY_NAME = "partition_assignment_strategy";
+
+    public static final String UNKNOWN_CONSUMER_ID = "";
 
     private final String groupId;
     private final int sessionTimeout;
@@ -36,7 +42,7 @@ public class JoinGroupRequest extends AbstractRequestResponse {
     private final String strategy;
 
     public JoinGroupRequest(String groupId, int sessionTimeout, List<String> topics, String consumerId, String strategy) {
-        super(new Struct(curSchema));
+        super(new Struct(CURRENT_SCHEMA));
         struct.set(GROUP_ID_KEY_NAME, groupId);
         struct.set(SESSION_TIMEOUT_KEY_NAME, sessionTimeout);
         struct.set(TOPICS_KEY_NAME, topics.toArray());
@@ -61,6 +67,21 @@ public class JoinGroupRequest extends AbstractRequestResponse {
         strategy = struct.getString(STRATEGY_KEY_NAME);
     }
 
+    @Override
+    public AbstractRequestResponse getErrorResponse(int versionId, Throwable e) {
+        switch (versionId) {
+            case 0:
+                return new JoinGroupResponse(
+                        Errors.forException(e).code(),
+                        JoinGroupResponse.UNKNOWN_GENERATION_ID,
+                        JoinGroupResponse.UNKNOWN_CONSUMER_ID,
+                        Collections.<TopicPartition>emptyList());
+            default:
+                throw new IllegalArgumentException(String.format("Version %d is not valid. Valid versions for %s are 0 to %d",
+                        versionId, this.getClass().getSimpleName(), ProtoUtils.latestVersion(ApiKeys.JOIN_GROUP.id)));
+        }
+    }
+
     public String groupId() {
         return groupId;
     }
@@ -81,7 +102,11 @@ public class JoinGroupRequest extends AbstractRequestResponse {
         return strategy;
     }
 
+    public static JoinGroupRequest parse(ByteBuffer buffer, int versionId) {
+        return new JoinGroupRequest(ProtoUtils.parseRequest(ApiKeys.JOIN_GROUP.id, versionId, buffer));
+    }
+
     public static JoinGroupRequest parse(ByteBuffer buffer) {
-        return new JoinGroupRequest(((Struct) curSchema.read(buffer)));
+        return new JoinGroupRequest((Struct) CURRENT_SCHEMA.read(buffer));
     }
 }

@@ -18,14 +18,16 @@
 package kafka.utils
 
 import kafka.api.LeaderAndIsr
-import kafka.controller.LeaderIsrAndControllerEpoch
-import org.apache.zookeeper.data.Stat
+import kafka.common.TopicAndPartition
+import kafka.controller.{IsrChangeNotificationListener, LeaderIsrAndControllerEpoch}
 import org.I0Itec.zkclient.ZkClient
+import org.apache.zookeeper.data.Stat
 
-import scala.Some
 import scala.collection._
 
 object ReplicationUtils extends Logging {
+
+  private val IsrChangeNotificationPrefix = "isr_change_"
 
   def updateLeaderAndIsr(zkClient: ZkClient, topic: String, partitionId: Int, newLeaderAndIsr: LeaderAndIsr, controllerEpoch: Int,
     zkVersion: Int): (Boolean,Int) = {
@@ -33,7 +35,15 @@ object ReplicationUtils extends Logging {
     val path = ZkUtils.getTopicPartitionLeaderAndIsrPath(topic, partitionId)
     val newLeaderData = ZkUtils.leaderAndIsrZkData(newLeaderAndIsr, controllerEpoch)
     // use the epoch of the controller that made the leadership decision, instead of the current controller epoch
-    ZkUtils.conditionalUpdatePersistentPath(zkClient, path, newLeaderData, zkVersion, Some(checkLeaderAndIsrZkData))
+    val updatePersistentPath: (Boolean, Int) = ZkUtils.conditionalUpdatePersistentPath(zkClient, path, newLeaderData, zkVersion, Some(checkLeaderAndIsrZkData))
+    updatePersistentPath
+  }
+
+  def propagateIsrChanges(zkClient: ZkClient, isrChangeSet: Set[TopicAndPartition]): Unit = {
+    val isrChangeNotificationPath: String = ZkUtils.createSequentialPersistentPath(
+      zkClient, ZkUtils.IsrChangeNotificationPath + "/" + IsrChangeNotificationPrefix,
+      generateIsrChangeJson(isrChangeSet))
+    debug("Added " + isrChangeNotificationPath + " for " + isrChangeSet)
   }
 
   def checkLeaderAndIsrZkData(zkClient: ZkClient, path: String, expectedLeaderAndIsrInfo: String): (Boolean,Int) = {
@@ -61,30 +71,27 @@ object ReplicationUtils extends Logging {
 
   def getLeaderIsrAndEpochForPartition(zkClient: ZkClient, topic: String, partition: Int):Option[LeaderIsrAndControllerEpoch] = {
     val leaderAndIsrPath = ZkUtils.getTopicPartitionLeaderAndIsrPath(topic, partition)
-    val leaderAndIsrInfo = ZkUtils.readDataMaybeNull(zkClient, leaderAndIsrPath)
-    val leaderAndIsrOpt = leaderAndIsrInfo._1
-    val stat = leaderAndIsrInfo._2
-    leaderAndIsrOpt match {
-      case Some(leaderAndIsrStr) => parseLeaderAndIsr(leaderAndIsrStr, leaderAndIsrPath, stat)
-      case None => None
-    }
+    val (leaderAndIsrOpt, stat) = ZkUtils.readDataMaybeNull(zkClient, leaderAndIsrPath)
+    leaderAndIsrOpt.flatMap(leaderAndIsrStr => parseLeaderAndIsr(leaderAndIsrStr, leaderAndIsrPath, stat))
   }
 
   private def parseLeaderAndIsr(leaderAndIsrStr: String, path: String, stat: Stat)
       : Option[LeaderIsrAndControllerEpoch] = {
-    Json.parseFull(leaderAndIsrStr) match {
-      case Some(m) =>
-        val leaderIsrAndEpochInfo = m.asInstanceOf[Map[String, Any]]
-        val leader = leaderIsrAndEpochInfo.get("leader").get.asInstanceOf[Int]
-        val epoch = leaderIsrAndEpochInfo.get("leader_epoch").get.asInstanceOf[Int]
-        val isr = leaderIsrAndEpochInfo.get("isr").get.asInstanceOf[List[Int]]
-        val controllerEpoch = leaderIsrAndEpochInfo.get("controller_epoch").get.asInstanceOf[Int]
-        val zkPathVersion = stat.getVersion
-        debug("Leader %d, Epoch %d, Isr %s, Zk path version %d for leaderAndIsrPath %s".format(leader, epoch,
-          isr.toString(), zkPathVersion, path))
-        Some(LeaderIsrAndControllerEpoch(LeaderAndIsr(leader, epoch, isr, zkPathVersion), controllerEpoch))
-      case None => None
-    }
+    Json.parseFull(leaderAndIsrStr).flatMap {m =>
+      val leaderIsrAndEpochInfo = m.asInstanceOf[Map[String, Any]]
+      val leader = leaderIsrAndEpochInfo.get("leader").get.asInstanceOf[Int]
+      val epoch = leaderIsrAndEpochInfo.get("leader_epoch").get.asInstanceOf[Int]
+      val isr = leaderIsrAndEpochInfo.get("isr").get.asInstanceOf[List[Int]]
+      val controllerEpoch = leaderIsrAndEpochInfo.get("controller_epoch").get.asInstanceOf[Int]
+      val zkPathVersion = stat.getVersion
+      debug("Leader %d, Epoch %d, Isr %s, Zk path version %d for leaderAndIsrPath %s".format(leader, epoch,
+        isr.toString(), zkPathVersion, path))
+      Some(LeaderIsrAndControllerEpoch(LeaderAndIsr(leader, epoch, isr, zkPathVersion), controllerEpoch))}
+  }
+
+  private def generateIsrChangeJson(isrChanges: Set[TopicAndPartition]): String = {
+    val partitions = isrChanges.map(tp => Map("topic" -> tp.topic, "partition" -> tp.partition)).toArray
+    Json.encode(Map("version" -> IsrChangeNotificationListener.version, "partitions" -> partitions))
   }
 
 }

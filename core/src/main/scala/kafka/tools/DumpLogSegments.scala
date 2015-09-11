@@ -25,6 +25,7 @@ import collection.mutable
 import joptsimple.OptionParser
 import kafka.serializer.Decoder
 import kafka.utils.VerifiableProperties
+import org.apache.kafka.common.utils.Utils
 
 object DumpLogSegments {
 
@@ -64,8 +65,8 @@ object DumpLogSegments {
     val maxMessageSize = options.valueOf(maxMessageSizeOpt).intValue()
     val isDeepIteration = if(options.has(deepIterationOpt)) true else false
   
-    val valueDecoder: Decoder[_] = Utils.createObject[Decoder[_]](options.valueOf(valueDecoderOpt), new VerifiableProperties)
-    val keyDecoder: Decoder[_] = Utils.createObject[Decoder[_]](options.valueOf(keyDecoderOpt), new VerifiableProperties)
+    val valueDecoder: Decoder[_] = CoreUtils.createObject[Decoder[_]](options.valueOf(valueDecoderOpt), new VerifiableProperties)
+    val keyDecoder: Decoder[_] = CoreUtils.createObject[Decoder[_]](options.valueOf(keyDecoderOpt), new VerifiableProperties)
 
     val misMatchesForIndexFilesMap = new mutable.HashMap[String, List[(Long, Long)]]
     val nonConsecutivePairsForLogFilesMap = new mutable.HashMap[String, List[(Long, Long)]]
@@ -104,8 +105,7 @@ object DumpLogSegments {
                         misMatchesForIndexFilesMap: mutable.HashMap[String, List[(Long, Long)]],
                         maxMessageSize: Int) {
     val startOffset = file.getName().split("\\.")(0).toLong
-    val logFileName = file.getAbsolutePath.split("\\.")(0) + Log.LogFileSuffix
-    val logFile = new File(logFileName)
+    val logFile = new File(file.getAbsoluteFile.getParent, file.getName.split("\\.")(0) + Log.LogFileSuffix)
     val messageSet = new FileMessageSet(logFile, false)
     val index = new OffsetIndex(file = file, baseOffset = startOffset)
     for(i <- 0 until index.entries) {
@@ -181,7 +181,7 @@ object DumpLogSegments {
         case NoCompressionCodec =>
           getSingleMessageIterator(messageAndOffset)
         case _ =>
-          ByteBufferMessageSet.decompress(message).iterator
+          ByteBufferMessageSet.deepIterator(message)
       }
     } else
       getSingleMessageIterator(messageAndOffset)

@@ -19,18 +19,17 @@ package kafka.server
 import kafka.log._
 import java.io.File
 import org.I0Itec.zkclient.ZkClient
-import org.scalatest.junit.JUnit3Suite
 import org.easymock.EasyMock
 import org.junit._
 import org.junit.Assert._
 import kafka.common._
 import kafka.cluster.Replica
-import kafka.utils.{SystemTime, KafkaScheduler, TestUtils, MockTime, Utils}
+import kafka.utils.{SystemTime, KafkaScheduler, TestUtils, MockTime, CoreUtils}
 import java.util.concurrent.atomic.AtomicBoolean
 
-class HighwatermarkPersistenceTest extends JUnit3Suite {
+class HighwatermarkPersistenceTest {
 
-  val configs = TestUtils.createBrokerConfigs(2).map(new KafkaConfig(_))
+  val configs = TestUtils.createBrokerConfigs(2, TestUtils.MockZkConnect).map(KafkaConfig.fromProps)
   val topic = "foo"
   val logManagers = configs map { config =>
     TestUtils.createLogManager(
@@ -41,9 +40,10 @@ class HighwatermarkPersistenceTest extends JUnit3Suite {
   @After
   def teardown() {
     for(manager <- logManagers; dir <- manager.logDirs)
-      Utils.rm(dir)
+      CoreUtils.rm(dir)
   }
 
+  @Test
   def testHighWatermarkPersistenceSinglePartition() {
     // mock zkclient
     val zkClient = EasyMock.createMock(classOf[ZkClient])
@@ -74,8 +74,12 @@ class HighwatermarkPersistenceTest extends JUnit3Suite {
     fooPartition0Hw = hwmFor(replicaManager, topic, 0)
     assertEquals(leaderReplicaPartition0.highWatermark.messageOffset, fooPartition0Hw)
     EasyMock.verify(zkClient)
+
+    // shutdown the replica manager upon test completion
+    replicaManager.shutdown(false)
   }
 
+  @Test
   def testHighWatermarkPersistenceMultiplePartitions() {
     val topic1 = "foo1"
     val topic2 = "foo2"
@@ -130,6 +134,10 @@ class HighwatermarkPersistenceTest extends JUnit3Suite {
     topic1Partition0Hw = hwmFor(replicaManager, topic1, 0)
     assertEquals(10L, topic1Partition0Hw)
     EasyMock.verify(zkClient)
+
+    // shutdown the replica manager upon test completion
+    replicaManager.shutdown(false)
+
   }
 
   def hwmFor(replicaManager: ReplicaManager, topic: String, partition: Int): Long = {

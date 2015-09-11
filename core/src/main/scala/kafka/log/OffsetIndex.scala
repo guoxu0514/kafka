@@ -24,7 +24,7 @@ import java.nio.channels._
 import java.util.concurrent.locks._
 import java.util.concurrent.atomic._
 import kafka.utils._
-import kafka.utils.Utils.inLock
+import kafka.utils.CoreUtils.inLock
 import kafka.common.InvalidOffsetException
 
 /**
@@ -81,7 +81,7 @@ class OffsetIndex(@volatile var file: File, val baseOffset: Long, val maxIndexSi
           idx.position(roundToExactMultiple(idx.limit, 8))
         idx
       } finally {
-        Utils.swallow(raf.close())
+        CoreUtils.swallow(raf.close())
       }
     }
   
@@ -114,7 +114,7 @@ class OffsetIndex(@volatile var file: File, val baseOffset: Long, val maxIndexSi
 
   /**
    * Find the largest offset less than or equal to the given targetOffset 
-   * and return a pair holding this offset and it's corresponding physical file position.
+   * and return a pair holding this offset and its corresponding physical file position.
    * 
    * @param targetOffset The offset to look up.
    * 
@@ -274,7 +274,7 @@ class OffsetIndex(@volatile var file: File, val baseOffset: Long, val maxIndexSi
    */
   def resize(newSize: Int) {
     inLock(lock) {
-      val raf = new RandomAccessFile(file, "rws")
+      val raf = new RandomAccessFile(file, "rw")
       val roundedNewSize = roundToExactMultiple(newSize, 8)
       val position = this.mmap.position
       
@@ -287,7 +287,7 @@ class OffsetIndex(@volatile var file: File, val baseOffset: Long, val maxIndexSi
         this.maxEntries = this.mmap.limit / 8
         this.mmap.position(position)
       } finally {
-        Utils.swallow(raf.close())
+        CoreUtils.swallow(raf.close())
       }
     }
   }
@@ -318,6 +318,8 @@ class OffsetIndex(@volatile var file: File, val baseOffset: Long, val maxIndexSi
    */
   def delete(): Boolean = {
     info("Deleting index " + this.file.getAbsolutePath)
+    if(Os.isWindows)
+      CoreUtils.swallow(forceUnmap(this.mmap))
     this.file.delete()
   }
   
@@ -373,7 +375,7 @@ class OffsetIndex(@volatile var file: File, val baseOffset: Long, val maxIndexSi
     if(Os.isWindows)
       lock.lock()
     try {
-      return fun
+      fun
     } finally {
       if(Os.isWindows)
         lock.unlock()

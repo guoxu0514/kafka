@@ -30,9 +30,8 @@ import scala.collection.immutable.Map
 
 case class PartitionFetchInfo(offset: Long, fetchSize: Int)
 
-
 object FetchRequest {
-  val CurrentVersion = 0.shortValue
+  val CurrentVersion = 1.shortValue
   val DefaultMaxWait = 0
   val DefaultMinBytes = 0
   val DefaultCorrelationId = 0
@@ -59,13 +58,13 @@ object FetchRequest {
   }
 }
 
-case class FetchRequest private[kafka] (versionId: Short = FetchRequest.CurrentVersion,
-                                        correlationId: Int = FetchRequest.DefaultCorrelationId,
-                                        clientId: String = ConsumerConfig.DefaultClientId,
-                                        replicaId: Int = Request.OrdinaryConsumerId,
-                                        maxWait: Int = FetchRequest.DefaultMaxWait,
-                                        minBytes: Int = FetchRequest.DefaultMinBytes,
-                                        requestInfo: Map[TopicAndPartition, PartitionFetchInfo])
+case class FetchRequest(versionId: Short = FetchRequest.CurrentVersion,
+                        correlationId: Int = FetchRequest.DefaultCorrelationId,
+                        clientId: String = ConsumerConfig.DefaultClientId,
+                        replicaId: Int = Request.OrdinaryConsumerId,
+                        maxWait: Int = FetchRequest.DefaultMaxWait,
+                        minBytes: Int = FetchRequest.DefaultMinBytes,
+                        requestInfo: Map[TopicAndPartition, PartitionFetchInfo])
         extends RequestOrResponse(Some(RequestKeys.FetchKey)) {
 
   /**
@@ -150,7 +149,7 @@ case class FetchRequest private[kafka] (versionId: Short = FetchRequest.CurrentV
         (topicAndPartition, FetchResponsePartitionData(ErrorMapping.codeFor(e.getClass.asInstanceOf[Class[Throwable]]), -1, MessageSet.Empty))
     }
     val errorResponse = FetchResponse(correlationId, fetchResponsePartitionData)
-    requestChannel.sendResponse(new RequestChannel.Response(request, new FetchResponseSend(errorResponse)))
+    requestChannel.sendResponse(new RequestChannel.Response(request, new FetchResponseSend(request.connectionId, errorResponse)))
   }
 
   override def describe(details: Boolean): String = {
@@ -171,7 +170,7 @@ case class FetchRequest private[kafka] (versionId: Short = FetchRequest.CurrentV
 @nonthreadsafe
 class FetchRequestBuilder() {
   private val correlationId = new AtomicInteger(0)
-  private val versionId = FetchRequest.CurrentVersion
+  private var versionId = FetchRequest.CurrentVersion
   private var clientId = ConsumerConfig.DefaultClientId
   private var replicaId = Request.OrdinaryConsumerId
   private var maxWait = FetchRequest.DefaultMaxWait
@@ -203,6 +202,11 @@ class FetchRequestBuilder() {
 
   def minBytes(minBytes: Int): FetchRequestBuilder = {
     this.minBytes = minBytes
+    this
+  }
+
+  def requestVersion(versionId: Short): FetchRequestBuilder = {
+    this.versionId = versionId
     this
   }
 
